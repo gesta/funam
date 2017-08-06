@@ -11,7 +11,8 @@ defmodule Funam.Mixfile do
   end
 
   def application do
-    [applications: [:logger]]
+    [applications: [:logger],
+      mod: {Funam, []}]
   end
 
   defp deps do
