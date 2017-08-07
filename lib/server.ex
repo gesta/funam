@@ -1,13 +1,26 @@
 defmodule Funam.Server do
-  use GenServer
+  require Logger
 
-  def start_link do
-    GenServer.start_link(__MODULE__, [], [name: {:global, __MODULE__}])
+  def do_it(phrase) do
+    Funam.Server.start_link()
+    Funam.Server.translate(phrase)
   end
 
-  def translate(phrase) do
-    GenServer.call({:global, __MODULE__}, {:translate, phrase})
+  def translate_phrase(url, nodes \\ Node.list()) do
+    Funam.Worker.start(translation_query(url))
   end
+
+  defp do_help do
+    IO.puts "Summat went wrong"
+  end
+
+ def start_link do
+   GenServer.start_link(__MODULE__, [], [name: {:global, __MODULE__}])
+ end
+
+ def translate(phrase) do
+   GenServer.call({:global, __MODULE__}, {:translate, phrase})
+ end
 
 
   def init([]) do
@@ -15,7 +28,7 @@ defmodule Funam.Server do
   end
 
   def handle_call({:translate, phrase}, _from, _wut) do
-    {:reply, translation_query(phrase), []}
+    {:reply, translate_phrase(phrase), []}
   end
 
   def translation_query(phrase) do

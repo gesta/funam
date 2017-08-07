@@ -1,28 +1,20 @@
 defmodule Funam do
   use Application
   require Logger
+  require HTTPotion
 
   def start(type, _args) do
-    import Supervisor.Spec
-    children = [worker(Funam.Server, [])]
-
     case type do
       :normal ->
-        Logger.info("Application is started on #{node()}")
+        Logger.info("Application starts on #{node()}")
 
       {:takeover, old_node} ->
-        Logger.info("#{node()} is taking over #{old_node}")
+        Logger.info("#{node()} takes over #{old_node}")
 
       {:failover, old_node} ->
-        Logger.info("#{old_node} is failing over to #{node()}")
+        Logger.info("#{old_node} fails over to #{node()}")
     end
 
-
-    opts = [strategy: :one_for_one, name: {:global, Funam.Supervisor}]
-    Supervisor.start_link(children, opts)
-  end
-
-  def translate(phrase) do
-    Funam.Server.translate(phrase)
+    Funam.Supervisor.start_link(:ok)
   end
 end
