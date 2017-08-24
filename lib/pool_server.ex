@@ -148,7 +148,6 @@ defmodule Funam.PoolServer do
         {:noreply, new_state}
 
       [] ->
-        # NOTE: Worker crashed, no monitor
         case Enum.member?(workers, pid) do
           true ->
             remaining_workers = workers |> Enum.reject(fn(p) -> p == pid end)
@@ -167,5 +166,110 @@ defmodule Funam.PoolServer do
 
   def terminate(_reason, _state) do
     :ok
+  end
+
+
+  defp name(pool_name) do
+    :"#{pool_name}Server"
+  end
+
+  defp prepopulate(size, sup) do
+    prepopulate(size, sup, [])
+  end
+
+  defp prepopulate(size, _sup, workers) when size < 1 do
+    workers
+  end
+
+  defp prepopulate(size, sup, workers) do
+    prepopulate(size-1, sup, [new_worker(sup)|workers])
+  end
+
+  defp new_worker(sup) do
+    {:ok, worker} = Supervisor.start_child(sup, [[]])
+    true = Process.link(worker)
+    worker
+  end
+
+  defp new_worker(sup, from_pid) do
+    pid = new_worker(sup)
+    ref = Process.monitor(from_pid)
+    {pid, ref}
+  end
+
+  defp dismiss_worker(sup, pid) do
+    true = Process.unlink(pid)
+    Supervisor.terminate_child(sup, pid)
+  end
+
+  def handle_checkin(pid, state) do
+    %{worker_sup:   worker_sup,
+      workers:      workers,
+      monitors:     monitors,
+      waiting:      waiting,
+      overflow:     overflow} = state
+
+    case :queue.out(waiting) do
+      {{:value, {from, ref}}, left} ->
+        true = :ets.insert(monitors, {pid, ref})
+        GenServer.reply(from, pid)
+        %{state | waiting: left}
+
+        {:empty, empty} when overflow > 0 ->
+        :ok = dismiss_worker(worker_sup, pid)
+        %{state | waiting: empty, overflow: overflow-1}
+
+      {:empty, empty} ->
+        %{state | waiting: empty, workers: [pid|workers], overflow: 0}
+    end
+  end
+
+  defp handle_worker_exit(pid, state) do
+    %{worker_sup:   worker_sup,
+      workers:      workers,
+      monitors:     monitors,
+      waiting:      waiting,
+      overflow:     overflow} = state
+
+    case :queue.out(waiting) do
+      {{:value, {from, ref}}, left} ->
+        new_worker = new_worker(worker_sup)
+        true = :ets.insert(monitors, {new_worker, ref})
+        GenServer.reply(from, new_worker)
+        %{state | waiting: left}
+
+      {:empty, empty} when overflow > 0 ->
+        %{state | overflow: overflow-1, waiting: empty}
+
+      {:empty, empty} ->
+        workers = [new_worker(worker_sup) | workers |> Enum.reject(fn(p) -> p != pid end)]
+        %{state | workers: workers, waiting: empty}
+    end
+  end
+
+  defp supervisor_spec(name, mfa) do
+    opts = [id: name <> "WorkerSupervisor", shutdown: 10000, restart: :temporary]
+    supervisor(Funam.WorkerSupervisor, [self, mfa], opts)
+  end
+
+  defp state_name(%State{overflow: overflow, max_overflow: max_overflow, workers: workers}) when overflow < 1 do
+    case length(workers) == 0 do
+      true ->
+        if max_overflow < 1 do
+          :full
+        else
+          :overflow
+        end
+      false ->
+        :ready
+    end
+  end
+
+  defp state_name(%State{overflow: max_overflow, max_overflow: max_overflow}) do
+    :full
+  end
+
+  defp state_name(_state) do
+    :overflow
   end
 end
