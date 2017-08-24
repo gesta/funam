@@ -3,6 +3,10 @@ defmodule Funam.PoolServer do
   import Supervisor.Spec
 
   defmodule State do
+    @moduledoc """
+    Helper module, containing a struct to define
+    all possible properties of a server state.
+    """
     defstruct pool_sup: nil,
     worker_sup: nil,
     monitors: nil,
@@ -16,23 +20,39 @@ defmodule Funam.PoolServer do
     max_overflow: nil
   end
 
+  @doc """
+  Take the pool Supervisor's pid and connect a the current process
+  to a new GenServer process.
+  """
   def start_link(pool_sup, pool_config) do
     GenServer.start_link(__MODULE__, [pool_sup, pool_config], name: name(pool_config[:name]))
   end
 
+  @doc """
+  Perform a sync call for a checkout to a specific server.
+  """
   def checkout(pool_name, timeout) do
     GenServer.call(name(pool_name), :checkout, timeout)
   end
 
+  @doc """
+  Perform an async call for a checkin to a specific server.
+  """
   def checkin(pool_name, worker_pid) do
     GenServer.cast(name(pool_name), {:checkin, worker_pid})
   end
 
+  @doc """
+  Perform a sync call for status data about specific server.
+  """
   def status(pool_name) do
     GenServer.call(name(pool_name), :status)
   end
 
-
+  @doc """
+  Store the pool Supervisor’s pid in the GenServer’s state.
+  Use helper init functions to save each and every property.
+  """
   def init([pool_sup, pool_config]) when is_pid(pool_sup) do
     Process.flag(:trap_exit, true)
     monitors = :ets.new(:monitors, [:private])
@@ -58,6 +78,9 @@ defmodule Funam.PoolServer do
     init(rest, %{state | max_overflow: max_overflow})
   end
 
+  @doc """
+  Send a message to thyself to generate the worker Supervisor process.
+  """
   def init([], state) do
     send(self, :start_worker_supervisor)
     {:ok, state}
@@ -67,6 +90,11 @@ defmodule Funam.PoolServer do
     init(rest, state)
   end
 
+  @doc """
+  Check if the workers are overflowing the capacity of the pool.
+  If a new worker is created, its information is saved in the
+  'monitors' table in the ets.
+  """
   def handle_call(:checkout, {from_pid, _ref} = from, state) do
     %{worker_sup:   worker_sup,
       workers:      workers,
@@ -91,6 +119,9 @@ defmodule Funam.PoolServer do
     end
   end
 
+  @doc """
+  Report wether the pool is :overflow , :full , or :ready.
+  """
   def handle_call(:status, _from, %{workers: workers, monitors: monitors} = state) do
     {:reply, {state_name(state), length(workers), :ets.info(monitors, :size)}, state}
   end
@@ -99,6 +130,10 @@ defmodule Funam.PoolServer do
     {:reply, {:error, :invalid_message}, :ok, state}
   end
 
+  @doc """
+  Unlink the worker from the pool server and tell the worker Supervisor
+  to terminate the child.
+  """
   def handle_cast({:checkin, worker}, %{monitors: monitors} = state) do
     case :ets.lookup(monitors, worker) do
       [{pid, ref}] ->
@@ -112,9 +147,13 @@ defmodule Funam.PoolServer do
     end
   end
 
+  @doc """
+  Start a worker supervisor through the pool Supervisor
+  and populate the worker Supervisor with workers.
+  """
   def handle_info(:start_worker_supervisor, state = %{pool_sup: pool_sup, name: name, mfa: mfa, size: size}) do
     {:ok, worker_sup} = Supervisor.start_child(pool_sup, supervisor_spec(name, mfa))
-    workers = prepopulate(size, worker_sup)
+    workers = populate(size, worker_sup)
     {:noreply, %{state | worker_sup: worker_sup, workers: workers}}
   end
 
@@ -130,10 +169,16 @@ defmodule Funam.PoolServer do
     end
   end
 
+  @doc """
+  When its Supervisor crashes, stop the server for the same reason.
+  """
   def handle_info({:EXIT, worker_sup, reason}, state = %{worker_sup: worker_sup}) do
     {:stop, reason, state}
   end
 
+  @doc """
+  Check whether the pool is overflowed, and if so, you decrement the counter.
+  """
   def handle_info({:EXIT, pid, _reason}, state = %{monitors: monitors, workers: workers, worker_sup: worker_sup}) do
     case :ets.lookup(monitors, pid) do
       [{pid, ref}] ->
@@ -168,16 +213,16 @@ defmodule Funam.PoolServer do
     :"#{pool_name}Server"
   end
 
-  defp prepopulate(size, sup) do
-    prepopulate(size, sup, [])
+  defp populate(size, sup) do
+    populate(size, sup, [])
   end
 
-  defp prepopulate(size, _sup, workers) when size < 1 do
+  defp populate(size, _sup, workers) when size < 1 do
     workers
   end
 
-  defp prepopulate(size, sup, workers) do
-    prepopulate(size-1, sup, [new_worker(sup)|workers])
+  defp populate(size, sup, workers) do
+    populate(size-1, sup, [new_worker(sup)|workers])
   end
 
   defp new_worker(sup) do
@@ -192,6 +237,9 @@ defmodule Funam.PoolServer do
     {pid, ref}
   end
 
+  @doc """
+  Terminate the worker and decrement overflow.
+  """
   defp dismiss_worker(sup, pid) do
     true = Process.unlink(pid)
     Supervisor.terminate_child(sup, pid)
@@ -242,6 +290,9 @@ defmodule Funam.PoolServer do
     end
   end
 
+  @doc """
+  Get specification of the children for the worker Supervisor.
+  """
   defp supervisor_spec(name, mfa) do
     opts = [id: name <> "WorkerSupervisor", shutdown: 10000, restart: :temporary]
     supervisor(Funam.WorkerSupervisor, [self, mfa], opts)
