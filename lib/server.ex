@@ -8,8 +8,8 @@ defmodule Funam.Server do
     GenServer.start_link(__MODULE__, pools_config, name: __MODULE__)
   end
 
-  def checkout(pool_name, block, timeout) do
-    Funam.PoolServer.checkout(pool_name, block, timeout)
+  def checkout(pool_name, timeout) do
+    Funam.PoolServer.checkout(pool_name, timeout)
   end
 
   def checkin(pool_name, worker_pid) do

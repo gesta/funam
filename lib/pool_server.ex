@@ -20,8 +20,8 @@ defmodule Funam.PoolServer do
     GenServer.start_link(__MODULE__, [pool_sup, pool_config], name: name(pool_config[:name]))
   end
 
-  def checkout(pool_name, block, timeout) do
-    GenServer.call(name(pool_name), {:checkout, block}, timeout)
+  def checkout(pool_name, timeout) do
+    GenServer.call(name(pool_name), :checkout, timeout)
   end
 
   def checkin(pool_name, worker_pid) do
@@ -67,7 +67,7 @@ defmodule Funam.PoolServer do
     init(rest, state)
   end
 
-  def handle_call({:checkout, block}, {from_pid, _ref} = from, state) do
+  def handle_call(:checkout, {from_pid, _ref} = from, state) do
     %{worker_sup:   worker_sup,
       workers:      workers,
       monitors:     monitors,
@@ -85,11 +85,6 @@ defmodule Funam.PoolServer do
         {worker, ref} = new_worker(worker_sup, from_pid)
         true = :ets.insert(monitors, {worker, ref})
         {:reply, worker, %{state | overflow: overflow+1}}
-
-      [] when block == true ->
-        ref = Process.monitor(from_pid)
-        waiting = :queue.in({from, ref}, waiting)
-        {:noreply, %{state | waiting: waiting}, :infinity}
 
       [] ->
         {:reply, :full, state};
