@@ -23,7 +23,16 @@ defmodule Worker do
     {:ok, parsed_body} = Poison.Parser.parse(body)
     translation = List.first(parsed_body["tuc"])["phrase"]["text"]
     Logger.info "'#{phrase}' translates as '#{translation}'"
-    {:stop, :normal, state}
+    {:stop, :normal, [translation | state]}
+  end
+
+  def handle_cast({:translate, phrase, %HTTPotion.ErrorResponse{message: message}}, state) do
+    {:error, :normal, [message | state]}
+  end
+
+  def handle_cast({:translate, phrase, %HTTPotion.Response{status_code: code, body: body}}, state)
+  when code >= 300 do
+    {:error, :normal, state}
   end
 
   defp translation_query(phrase) do
