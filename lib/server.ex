@@ -20,20 +20,21 @@ defmodule Funam.Server do
     Funam.PoolServer.status(pool_name)
   end
 
- def translate(phrase) do
-   GenServer.call({:global, __MODULE__}, {:translate, phrase})
+
+ def init(pools_config) do
+   pools_config |> Enum.each(fn(pool_config) ->
+     send(self(), {:start_pool, pool_config})
+   end)
+   {:ok, pools_config}
  end
 
+ def handle_info({:start_pool, pool_config}, state) do
+   {:ok, _pool_sup} = Supervisor.start_child(Funam.PoolsSupervisor, supervisor_spec(pool_config))
+   {:noreply, state}
+ end
 
-  def init([]) do
-    {:ok, []}
-  end
-
-  def handle_call({:translate, phrase}, _from, _wut) do
-    {:reply, translate_phrase(phrase), []}
-  end
-
-  def translation_query(phrase) do
-    "https://glosbe.com/gapi/translate?from=eng&dest=bg&format=json&phrase=#{phrase}"
+  defp supervisor_spec(pool_config) do
+    opts = [id: :"#{pool_config[:name]}Supervisor"]
+    supervisor(Funam.PoolSupervisor, [pool_config], opts)
   end
 end
