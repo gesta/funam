@@ -1,20 +1,32 @@
-defmodule Funam.Worker do
+defmodule Worker do
   require Logger
   require Poison
+  require HTTPotion
 
-  def start(url) do
-    handle_response(HTTPotion.get(url))
+  use GenServer
+
+  def start_link(_) do
+    GenServer.start_link(__MODULE__, :ok, [])
   end
 
-  defp handle_response(%HTTPotion.Response{status_code: code, body: body})
-  when code >= 200 and code <= 304 do
-    Logger.info "worker [#{node}-#{inspect self}] completed"
+  def stop(pid) do
+    GenServer.call(pid, :stop)
+  end
+
+  def translate(pid, phrase), do: GenServer.cast(pid, {:translate, phrase, HTTPotion.get(translation_query(phrase))})
+
+  def handle_call(:stop, _from, state), do: {:stop, :normal, :ok, state}
+
+  def handle_cast({:translate, phrase, %HTTPotion.Response{status_code: code, body: body}}, state)
+  when is_integer(code) and code >= 200 and code < 300 do
+    Logger.info "worker [#{node()}-#{inspect self()}] is on the job"
     {:ok, parsed_body} = Poison.Parser.parse(body)
-    {:ok, List.first(parsed_body["tuc"])["phrase"]["text"]}
+    translation = List.first(parsed_body["tuc"])["phrase"]["text"]
+    Logger.info "'#{phrase}' translates as '#{translation}'"
+    {:stop, :normal, state}
   end
 
-  defp handle_response({:error, reason}) do
-    Logger.info "worker [#{node}-#{inspect self}] error due to #{inspect reason}"
-    {:error, reason}
+  defp translation_query(phrase) do
+    "https://glosbe.com/gapi/translate?from=eng&dest=bg&format=json&phrase=#{phrase}"
   end
 end
